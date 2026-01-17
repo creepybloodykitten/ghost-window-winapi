@@ -2,7 +2,8 @@
 
 
 HWND ghost_window=NULL;
-
+int current_alpha=128;
+HHOOK hMouseHook = NULL; //хендл для мыши(чтобы детектить колесико колесико)
 
 void toggle_ghost_mode()
 {
@@ -39,7 +40,7 @@ void toggle_ghost_mode()
 
     SetWindowPos(hwnd_to_ghost, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
-    SetLayeredWindowAttributes(hwnd_to_ghost, 0, 128, LWA_ALPHA); //применяем уровень прозрачности
+    SetLayeredWindowAttributes(hwnd_to_ghost, 0, (BYTE)current_alpha, LWA_ALPHA); //применяем уровень прозрачности
     // crKey - цвет, который должен стать прозрачным (нам не нужно, поэтому 0)
     // bAlpha  - степень прозрачности (0 - невидимое, 255 - обычное) 128 = 50%
     // LWA_ALPHA - флаг, использующий параметр bAlpha
@@ -48,6 +49,39 @@ void toggle_ghost_mode()
     
 }
 
+// для обработки мыши соблюдаем контракт LRESULT (CALLBACK *HOOKPROC)(int code, WPARAM wParam, LPARAM lParam);
+//и hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, hInstance, 0); в main
+LRESULT CALLBACK LowLevelMouseProc(int code,WPARAM wParam,LPARAM lParam)
+{
+    // nCode == HC_ACTION означает, что есть полезное сообщение
+    // wParam == WM_MOUSEWHEEL означает, что крутят колесико
+    if (code == HC_ACTION && wParam == WM_MOUSEWHEEL) 
+    {
+        if (ghost_window != NULL)//если существует окно призрак
+        {
+            if (GetAsyncKeyState(VK_RMENU) & 0x8000)//если зажат правый alt
+            {
+                // получаем информацию о колесике из структуры
+                MSLLHOOKSTRUCT* pMouseStruct = (MSLLHOOKSTRUCT*)lParam;
+                // mouseData хранит направление прокрутки в старшем слове
+                short delta = HIWORD(pMouseStruct->mouseData);
+
+                if (delta > 0) current_alpha += 15; // крутим колесико вверх - непрозрачнее
+                else current_alpha -= 15; // крутим вниз - прозрачнее
+
+                if (current_alpha > 255) current_alpha = 255;
+                if (current_alpha < 10) current_alpha = 0;
+
+                SetLayeredWindowAttributes(ghost_window, 0, (BYTE)current_alpha, LWA_ALPHA);
+
+                return 1; //1 - не передаем событие дальше 
+            }
+            
+        }
+    }
+    // eсли условия не совпали, передаем управление дальше системе
+    return CallNextHookEx(hMouseHook, code, wParam, lParam);
+}
 
 int WINAPI WinMain(
     HINSTANCE hInstance, //HINSTANCE - это номер запущенного приложения в памяти
@@ -57,12 +91,19 @@ int WINAPI WinMain(
     )
 {
    //сообщение WM_HOTKEY будет при нажатии
-   //создаем хоткей
-    if (!RegisterHotKey(NULL, 1, MOD_CONTROL, VK_SPACE))//когда будет данная комбинация то только она придет в этот поток и в эту программу
+   //создаем хоткей для перехода в призрачный режим
+    if (!RegisterHotKey(NULL, 1, MOD_CONTROL | MOD_ALT, 'Z'))//когда будет данная комбинация то только она придет в этот поток и в эту программу
     {
-        //MessageBox(NULL, "cant regist Hotkey!", "error", MB_ICONERROR);
         return 1;
     }
+
+    //хук на мышь
+    hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, hInstance, 0);
+    if (!hMouseHook)
+    {
+        return 1;
+    }
+
 
     MSG msg; //cтруктура сообщения ,cюда windows будет класть информацию о событиях
 
@@ -81,6 +122,7 @@ int WINAPI WinMain(
         }
     }
 
+    UnhookWindowsHookEx(hMouseHook);
     UnregisterHotKey(NULL, 1);
     return 0;
 }

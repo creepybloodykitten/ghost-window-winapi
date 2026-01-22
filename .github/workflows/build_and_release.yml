@@ -11,10 +11,21 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest 
-    steps:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps: 
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Install Dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libx11-dev libxfixes-dev
 
     - name: Configure Makefile
       run: cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -22,11 +33,48 @@ jobs:
     - name: Build
       run: cmake --build build --config Release
 
+    - name: Prepare Artifact (Windows)
+      if: runner.os == 'Windows'
+      shell: cmd
+      run: |
+        copy build\Release\ghost_window.exe ghost_window.exe
+
+    - name: Prepare Artifact (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        mv build/ghost_window ghost_window_linux
+        chmod +x ghost_window_linux
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ matrix.os }}
+        path: |
+          ghost_window.exe
+          ghost_window_linux
+        if-no-files-found: ignore
+
+  release:
+    needs: build # Ждем, пока завершится job 'build'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: build-*       # Скачиваем артефакты от обеих ОС
+        merge-multiple: true   # Сваливаем всё в одну папку
+
+
+    - name: List files (Debug)
+      run: ls -R
+
     - name: Publish Release
       uses: softprops/action-gh-release@v1
       with:
         tag_name: latest        
-        name: Latest Build      
-        files: build/Release/*.exe
+        name: Latest Build (Windows & Linux)      
+        files: |
+          ghost_window.exe
+          ghost_window_linux
         draft: false           
         prerelease: false
